@@ -1,0 +1,54 @@
+plugins {
+    id 'com.android.application'
+}
+
+def signingPropertiesFile = rootProject.file('.signing/keystore.properties')
+def signingProperties = new Properties()
+if (signingPropertiesFile.exists()) {
+    signingPropertiesFile.withInputStream { signingProperties.load(it) }
+}
+
+android {
+    namespace 'dev.ertu.quietfilter'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId 'dev.ertu.quietfilter'
+        minSdk 26
+        targetSdk 35
+        versionCode 6
+        versionName '1.5'
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    lint {
+        checkReleaseBuilds false
+    }
+
+    signingConfigs {
+        if (signingPropertiesFile.exists()) {
+            local {
+                storeFile rootProject.file(signingProperties['storeFile'])
+                storePassword signingProperties['storePassword']
+                keyAlias signingProperties['keyAlias']
+                keyPassword signingProperties['keyPassword']
+            }
+        }
+    }
+
+    buildTypes {
+        debug {
+            if (signingPropertiesFile.exists()) signingConfig signingConfigs.local
+        }
+        release {
+            minifyEnabled false
+            shrinkResources false
+            if (signingPropertiesFile.exists()) signingConfig signingConfigs.local
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+}

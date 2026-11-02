@@ -1,0 +1,12 @@
+services:
+  android-build:
+    platform: linux/amd64
+    build: .
+    working_dir: /workspace
+    volumes:
+      - .:/workspace
+      - gradle-cache:/root/.gradle
+    command: gradle --no-daemon assembleDebug
+
+volumes:
+  gradle-cache:
