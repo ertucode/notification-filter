@@ -1,6 +1,6 @@
 # QuietFilter
 
-A small, local-only Android notification blocker. Rules can target one app or all apps, combine multiple text conditions, and use contains, exact, negative, or regular-expression matching. Removed notifications remain in a 30-day in-app history.
+A small, local-only Android notification blocker. Rules can target one app or all apps, combine multiple text conditions, and use contains, exact, negative, or regular-expression matching. Removed notifications remain in a 30-day in-app history. Standalone six-digit codes in incoming notifications appear in a small right-center pop-up with a copy button and the SMS or email sender when available. The app requests display-over-other-apps access for this placement and falls back to a heads-up notification without it.
 
 Rule configurations can be imported, saved, or shared as `.quietfilterconfig` JSON files from **Rules → Transfer**. Opening or sharing one of these files to QuietFilter starts the import confirmation directly, including from WhatsApp. History is never included in exported configurations.
 

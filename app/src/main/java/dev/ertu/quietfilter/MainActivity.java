@@ -126,6 +126,22 @@ public final class MainActivity extends Activity {
             warning.setPadding(0, 0, 0, Ui.dp(this, 16));
             content.addView(warning);
         }
+        if (!Settings.canDrawOverlays(this)) {
+            LinearLayout overlayWarning = new LinearLayout(this);
+            overlayWarning.setGravity(Gravity.CENTER_VERTICAL);
+            overlayWarning.setPadding(0, 0, 0, Ui.dp(this, 16));
+            TextView message = Ui.text(this,
+                    "Allow display over other apps for right-side OTP pop-ups.", 14);
+            message.setTextColor(Color.rgb(145, 72, 30));
+            overlayWarning.addView(message, new LinearLayout.LayoutParams(
+                    0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+            Button allow = new Button(this);
+            allow.setText("Allow");
+            Ui.styleSecondary(allow);
+            allow.setOnClickListener(view -> openOverlaySettings());
+            overlayWarning.addView(allow);
+            content.addView(overlayWarning);
+        }
         if (showingHistory) renderHistory(); else renderRules();
     }
 
@@ -334,6 +350,16 @@ public final class MainActivity extends Activity {
         String enabled = Settings.Secure.getString(getContentResolver(), "enabled_notification_listeners");
         String component = new ComponentName(this, FilterNotificationService.class).flattenToString();
         return enabled != null && enabled.contains(component);
+    }
+
+    private void openOverlaySettings() {
+        Intent intent = new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                Uri.parse("package:" + getPackageName()));
+        try {
+            startActivity(intent);
+        } catch (RuntimeException error) {
+            startActivity(new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION));
+        }
     }
 
     private void requestSummaryPermission() {

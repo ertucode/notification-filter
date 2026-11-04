@@ -4,4 +4,11 @@
     <color name="primary_dark">#234335</color>
     <color name="accent">#315C49</color>
     <color name="window_background">#FAFAF7</color>
+    <color name="otp_background">#FAFAF7</color>
+    <color name="otp_text_primary">#202421</color>
+    <color name="otp_text_secondary">#555E59</color>
+    <color name="otp_code">#173D2D</color>
+    <color name="otp_button_background">#315C49</color>
+    <color name="otp_button_text">#FFFFFF</color>
+    <color name="otp_border">#C8D1CC</color>
 </resources>

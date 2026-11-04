@@ -168,8 +168,16 @@ public final class RuleEditorActivity extends Activity {
         card.addView(operator, fullWidth());
         EditText value = new EditText(this);
         value.setHint("Text or pattern");
-        value.setSingleLine(true);
-        value.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
+        value.setSingleLine(false);
+        value.setMinLines(3);
+        value.setMaxLines(8);
+        value.setGravity(Gravity.TOP | Gravity.START);
+        value.setHorizontallyScrolling(false);
+        value.setInputType(InputType.TYPE_CLASS_TEXT
+                | InputType.TYPE_TEXT_FLAG_MULTI_LINE
+                | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
+        value.setTextIsSelectable(true);
+        value.setLongClickable(true);
         value.setText(condition.value);
         card.addView(value, fullWidth());
         Button remove = new Button(this);
