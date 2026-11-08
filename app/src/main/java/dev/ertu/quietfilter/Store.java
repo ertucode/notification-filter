@@ -123,6 +123,18 @@ final class Store {
         prefs(context).edit().remove(BLOCK_COUNT).commit();
     }
 
+    static int acknowledgeBlockCount(Context context, int acknowledgedCount) {
+        synchronized (LOCK) {
+            SharedPreferences preferences = prefs(context);
+            int remaining = Math.max(0,
+                    preferences.getInt(BLOCK_COUNT, 0) - Math.max(0, acknowledgedCount));
+            SharedPreferences.Editor edit = preferences.edit();
+            if (remaining == 0) edit.remove(BLOCK_COUNT); else edit.putInt(BLOCK_COUNT, remaining);
+            edit.commit();
+            return remaining;
+        }
+    }
+
     static boolean isBlockSoundEnabled(Context context) {
         return prefs(context).getBoolean(BLOCK_SOUND, false);
     }

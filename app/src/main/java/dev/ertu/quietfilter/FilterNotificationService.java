@@ -41,6 +41,8 @@ public final class FilterNotificationService extends NotificationListenerService
     private static final String SUMMARY_CHANNEL = "block_summary";
     private static final String OTP_CHANNEL = "otp_popups";
     private static final int SUMMARY_NOTIFICATION_ID = 1001;
+    private static final int SUMMARY_DISMISS_REQUEST_ID = 1004;
+    private static final int MAX_SUMMARY_LINES = 7;
     static final int OTP_NOTIFICATION_ID = 1002;
     private static final int OTP_COPY_REQUEST_ID = 1003;
     private static final long OTP_POPUP_DURATION_MS = 12_000;
@@ -182,6 +184,12 @@ public final class FilterNotificationService extends NotificationListenerService
         if (manager != null) manager.cancel(SUMMARY_NOTIFICATION_ID);
     }
 
+    static void acknowledgeBlockSummary(Context context, int count) {
+        int remaining = Store.acknowledgeBlockCount(context, count);
+        FilterNotificationService service = activeInstance;
+        if (remaining > 0 && service != null) service.showBlockSummary(remaining);
+    }
+
     private void showBlockSummary(int count) {
         NotificationManager manager = getSystemService(NotificationManager.class);
         if (manager == null) return;
@@ -197,15 +205,30 @@ public final class FilterNotificationService extends NotificationListenerService
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
         PendingIntent pendingOpen = PendingIntent.getActivity(this, 0, open,
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+        Intent dismiss = new Intent(this, BlockSummaryDismissReceiver.class)
+                .putExtra(BlockSummaryDismissReceiver.EXTRA_BLOCK_COUNT, count);
+        PendingIntent pendingDismiss = PendingIntent.getBroadcast(this,
+                SUMMARY_DISMISS_REQUEST_ID, dismiss,
+                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
         String title = count == 1 ? "1 notification blocked" : count + " notifications blocked";
+        Notification.InboxStyle expanded = new Notification.InboxStyle()
+                .setBigContentTitle(title)
+                .setSummaryText("Tap to view all blocked notifications");
+        List<HistoryEntry> history = Store.getHistory(this);
+        int available = Math.min(count, history.size());
+        int shown = Math.min(available, count > MAX_SUMMARY_LINES ? MAX_SUMMARY_LINES - 1
+                : MAX_SUMMARY_LINES);
+        for (int i = 0; i < shown; i++) expanded.addLine(blockedNotificationLine(history.get(i)));
+        if (count > shown) expanded.addLine("+" + (count - shown) + " more");
         Notification summary = new Notification.Builder(this, SUMMARY_CHANNEL)
                 .setSmallIcon(R.drawable.ic_notification)
                 .setColor(Color.rgb(49, 92, 73))
                 .setContentTitle(title)
-                .setContentText("Tap to view and clear this count")
+                .setContentText("Expand to view blocked notifications")
+                .setStyle(expanded)
                 .setContentIntent(pendingOpen)
+                .setDeleteIntent(pendingDismiss)
                 .setCategory(Notification.CATEGORY_STATUS)
-                .setOngoing(true)
                 .setOnlyAlertOnce(true)
                 .setNumber(count)
                 .build();
@@ -214,6 +237,21 @@ public final class FilterNotificationService extends NotificationListenerService
         } catch (SecurityException ignored) {
             // Android 13+ users can decline notification permission; filtering still works.
         }
+    }
+
+    private static String blockedNotificationLine(HistoryEntry entry) {
+        String app = entry.appLabel == null || entry.appLabel.trim().isEmpty()
+                ? entry.packageName : entry.appLabel.trim();
+        String title = singleLine(entry.title);
+        String text = singleLine(entry.text);
+        String details = title.isEmpty() ? text : title;
+        if (!title.isEmpty() && !text.isEmpty() && !text.equals(title)) details += " — " + text;
+        if (details.isEmpty()) details = "Blocked by " + entry.ruleName;
+        return app + ": " + details;
+    }
+
+    private static String singleLine(String value) {
+        return value == null ? "" : value.trim().replaceAll("\\s*\\n\\s*", " · ");
     }
 
     private void playBlockSound() {

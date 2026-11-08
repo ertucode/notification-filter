@@ -4,6 +4,8 @@
 
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
 
     <queries>
         <intent>
@@ -63,8 +65,32 @@
                 android:value="media" />
         </service>
 
+        <service
+            android:name=".ScreenDimmerService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Maintains a user-selected screen darkening overlay" />
+        </service>
+
+        <service
+            android:name=".ScreenDimmerTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_screen_dimmer"
+            android:label="Screen dimmer"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
         <receiver
             android:name=".OtpCopyReceiver"
+            android:exported="false" />
+
+        <receiver
+            android:name=".BlockSummaryDismissReceiver"
             android:exported="false" />
 
         <provider
