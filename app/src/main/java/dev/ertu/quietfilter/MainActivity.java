@@ -32,7 +32,9 @@ import java.nio.charset.StandardCharsets;
 
 import java.text.DateFormat;
 import java.util.Date;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 public final class MainActivity extends Activity {
     private static final int IMPORT_CONFIG = 10;
@@ -184,6 +186,26 @@ public final class MainActivity extends Activity {
         soundRow.addView(blockSound);
         content.addView(soundRow);
 
+        LinearLayout readRow = new LinearLayout(this);
+        readRow.setGravity(Gravity.CENTER_VERTICAL);
+        readRow.setPadding(0, Ui.dp(this, 8), 0, Ui.dp(this, 16));
+        LinearLayout readText = new LinearLayout(this);
+        readText.setOrientation(LinearLayout.VERTICAL);
+        readText.addView(Ui.heading(this, "Read WhatsApp aloud"));
+        TextView readDescription = Ui.text(this,
+                "Speak the sender and message when the phone is locked and Bluetooth audio is connected.", 13);
+        readDescription.setTextColor(Color.DKGRAY);
+        readText.addView(readDescription);
+        readRow.addView(readText, new LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+        Switch readWhatsApp = new Switch(this);
+        readWhatsApp.setChecked(Store.isReadWhatsAppEnabled(this));
+        readWhatsApp.setContentDescription("Read WhatsApp messages aloud over Bluetooth");
+        readWhatsApp.setOnCheckedChangeListener((button, checked) ->
+                Store.setReadWhatsAppEnabled(this, checked));
+        readRow.addView(readWhatsApp);
+        content.addView(readRow);
+
         List<HistoryEntry> entries = Store.getHistory(this);
         if (entries.isEmpty()) {
             TextView empty = Ui.text(this, "Removed notifications will appear here for 30 days.", 15);
@@ -264,36 +286,58 @@ public final class MainActivity extends Activity {
             content.addView(empty);
             return;
         }
+        Map<String, List<Rule>> rulesByApp = new LinkedHashMap<>();
         for (Rule rule : rules) {
-            LinearLayout row = verticalCard();
-            LinearLayout firstLine = new LinearLayout(this);
-            firstLine.setGravity(Gravity.CENTER_VERTICAL);
-            TextView name = Ui.heading(this, rule.name);
-            firstLine.addView(name, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
-            Switch enabled = new Switch(this);
-            enabled.setChecked(rule.enabled);
-            enabled.setContentDescription("Enable " + rule.name);
-            enabled.setOnCheckedChangeListener((button, checked) -> {
-                rule.enabled = checked;
-                Store.saveRule(this, rule);
-            });
-            firstLine.addView(enabled);
-            row.addView(firstLine);
-            row.addView(Ui.text(this, summary(rule), 14));
-            row.setOnClickListener(view -> {
-                Intent intent = new Intent(this, RuleEditorActivity.class);
-                intent.putExtra("rule_id", rule.id);
-                startActivity(intent);
-            });
-            content.addView(row);
-            content.addView(Ui.divider(this));
+            String packageName = rule.packageName == null ? "" : rule.packageName;
+            rulesByApp.computeIfAbsent(packageName, ignored -> new java.util.ArrayList<>()).add(rule);
+        }
+        for (List<Rule> appRules : rulesByApp.values()) {
+            Rule firstRule = appRules.get(0);
+            String appLabel = firstRule.packageName == null || firstRule.packageName.isEmpty()
+                    ? "All apps"
+                    : firstRule.appLabel;
+            if (appLabel == null || appLabel.isEmpty()) appLabel = firstRule.packageName;
+
+            TextView appHeading = Ui.heading(this, appLabel);
+            appHeading.setPadding(0, Ui.dp(this, 24), 0, Ui.dp(this, 4));
+            content.addView(appHeading);
+            TextView ruleCount = Ui.text(this, appRules.size()
+                    + (appRules.size() == 1 ? " rule" : " rules"), 13);
+            ruleCount.setTextColor(Color.DKGRAY);
+            ruleCount.setPadding(0, 0, 0, Ui.dp(this, 4));
+            content.addView(ruleCount);
+
+            for (Rule rule : appRules) {
+                LinearLayout row = verticalCard();
+                LinearLayout firstLine = new LinearLayout(this);
+                firstLine.setGravity(Gravity.CENTER_VERTICAL);
+                TextView name = Ui.heading(this, rule.name);
+                firstLine.addView(name, new LinearLayout.LayoutParams(
+                        0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+                Switch enabled = new Switch(this);
+                enabled.setChecked(rule.enabled);
+                enabled.setContentDescription("Enable " + rule.name);
+                enabled.setOnCheckedChangeListener((button, checked) -> {
+                    rule.enabled = checked;
+                    Store.saveRule(this, rule);
+                });
+                firstLine.addView(enabled);
+                row.addView(firstLine);
+                row.addView(Ui.text(this, summary(rule), 14));
+                row.setOnClickListener(view -> {
+                    Intent intent = new Intent(this, RuleEditorActivity.class);
+                    intent.putExtra("rule_id", rule.id);
+                    startActivity(intent);
+                });
+                content.addView(row);
+                content.addView(Ui.divider(this));
+            }
         }
     }
 
     private String summary(Rule rule) {
-        String app = rule.packageName.isEmpty() ? "All apps" : rule.appLabel;
         int count = rule.conditions.size();
-        return app + " · " + count + (count == 1 ? " condition" : " conditions")
+        return count + (count == 1 ? " condition" : " conditions")
                 + (count > 1 ? (rule.matchAll ? " · match all" : " · match any") : "");
     }
 

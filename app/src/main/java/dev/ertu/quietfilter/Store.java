@@ -21,6 +21,7 @@ final class Store {
     private static final String KNOWN_APPS = "known_apps";
     private static final String BLOCK_COUNT = "block_count";
     private static final String BLOCK_SOUND = "block_sound";
+    private static final String READ_WHATSAPP = "read_whatsapp";
     private static final int MAX_HISTORY = 500;
     private static final long HISTORY_LIFETIME_MS = 30L * 24 * 60 * 60 * 1000;
     private static final Object LOCK = new Object();
@@ -141,6 +142,14 @@ final class Store {
 
     static void setBlockSoundEnabled(Context context, boolean enabled) {
         prefs(context).edit().putBoolean(BLOCK_SOUND, enabled).apply();
+    }
+
+    static boolean isReadWhatsAppEnabled(Context context) {
+        return prefs(context).getBoolean(READ_WHATSAPP, false);
+    }
+
+    static void setReadWhatsAppEnabled(Context context, boolean enabled) {
+        prefs(context).edit().putBoolean(READ_WHATSAPP, enabled).apply();
     }
 
     static void deleteHistory(Context context, String id) {

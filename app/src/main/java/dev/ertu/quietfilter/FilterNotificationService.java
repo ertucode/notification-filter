@@ -4,6 +4,7 @@ import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
+import android.app.KeyguardManager;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
@@ -12,6 +13,8 @@ import android.content.pm.ApplicationInfo;
 import android.graphics.Color;
 import android.graphics.PixelFormat;
 import android.media.AudioManager;
+import android.media.AudioAttributes;
+import android.media.AudioDeviceInfo;
 import android.media.ToneGenerator;
 import android.os.Bundle;
 import android.os.Build;
@@ -21,6 +24,8 @@ import android.provider.Settings;
 import android.service.notification.NotificationListenerService;
 import android.service.notification.StatusBarNotification;
 import android.text.TextUtils;
+import android.view.textclassifier.TextClassificationManager;
+import android.view.textclassifier.TextLanguage;
 import android.view.Gravity;
 import android.view.LayoutInflater;
 import android.view.View;
@@ -28,11 +33,15 @@ import android.view.WindowManager;
 import android.widget.RemoteViews;
 import android.widget.TextView;
 import android.widget.Toast;
+import android.speech.tts.TextToSpeech;
 
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -47,6 +56,10 @@ public final class FilterNotificationService extends NotificationListenerService
     private static final int OTP_COPY_REQUEST_ID = 1003;
     private static final long OTP_POPUP_DURATION_MS = 12_000;
     private static final Pattern OTP_PATTERN = Pattern.compile("(?<!\\d)\\d{6}(?!\\d)");
+    private static final String WHATSAPP_PACKAGE = "com.whatsapp";
+    private static final String WHATSAPP_BUSINESS_PACKAGE = "com.whatsapp.w4b";
+    private static final long SPOKEN_MESSAGE_LIFETIME_MS = 5 * 60 * 1000;
+    private static final int MAX_SPOKEN_MESSAGES = 50;
     private static volatile FilterNotificationService activeInstance;
     private ToneGenerator toneGenerator;
     private final Handler otpHandler = new Handler(Looper.getMainLooper());
@@ -55,6 +68,10 @@ public final class FilterNotificationService extends NotificationListenerService
     private View otpOverlay;
     private String lastOtpNotificationKey = "";
     private String lastOtp = "";
+    private final Map<String, Long> spokenMessages = new LinkedHashMap<>();
+    private final List<SpeechItem> pendingSpeech = new ArrayList<>();
+    private TextToSpeech textToSpeech;
+    private boolean textToSpeechStarting;
 
     @Override
     public void onListenerConnected() {
@@ -82,6 +99,12 @@ public final class FilterNotificationService extends NotificationListenerService
             toneGenerator.release();
             toneGenerator = null;
         }
+        pendingSpeech.clear();
+        if (textToSpeech != null) {
+            textToSpeech.stop();
+            textToSpeech.shutdown();
+            textToSpeech = null;
+        }
         super.onDestroy();
     }
 
@@ -89,6 +112,7 @@ public final class FilterNotificationService extends NotificationListenerService
     public void onNotificationPosted(StatusBarNotification notification) {
         rememberApp(notification);
         showOtpIfPresent(notification);
+        readWhatsAppIfAppropriate(notification);
         List<Rule> rules = Store.getRules(this);
         for (Rule rule : rules) {
             if (matches(notification, rule)) {
@@ -260,6 +284,170 @@ public final class FilterNotificationService extends NotificationListenerService
             if (toneGenerator == null) toneGenerator = new ToneGenerator(AudioManager.STREAM_NOTIFICATION, 35);
             toneGenerator.startTone(ToneGenerator.TONE_PROP_BEEP, 70);
         } catch (RuntimeException ignored) { }
+    }
+
+    private void readWhatsAppIfAppropriate(StatusBarNotification notification) {
+        if (!Store.isReadWhatsAppEnabled(this) || notification == null) return;
+        String packageName = notification.getPackageName();
+        if (!WHATSAPP_PACKAGE.equals(packageName)
+                && !WHATSAPP_BUSINESS_PACKAGE.equals(packageName)) return;
+        if (!isDeviceLocked() || !hasBluetoothAudioOutput()) return;
+        Notification raw = notification.getNotification();
+        if (raw == null) return;
+        SpokenMessage message = spokenMessage(raw);
+        if (message == null || message.text.isEmpty()) return;
+
+        long now = System.currentTimeMillis();
+        spokenMessages.entrySet().removeIf(entry -> now - entry.getValue() > SPOKEN_MESSAGE_LIFETIME_MS);
+        String signature = packageName + "\n" + message.sender + "\n" + message.text;
+        if (spokenMessages.containsKey(signature)) return;
+        spokenMessages.put(signature, now);
+        while (spokenMessages.size() > MAX_SPOKEN_MESSAGES) {
+            String oldest = spokenMessages.keySet().iterator().next();
+            spokenMessages.remove(oldest);
+        }
+
+        Locale locale = detectSpeechLocale(message.text);
+        boolean turkish = "tr".equals(locale.getLanguage());
+        String introduction;
+        if (message.sender.isEmpty()) {
+            introduction = turkish ? "WhatsApp mesajı. " : "WhatsApp message. ";
+        } else {
+            introduction = turkish
+                    ? message.sender + " kişisinden WhatsApp mesajı. "
+                    : "WhatsApp message from " + message.sender + ". ";
+        }
+        speak(introduction + truncateForSpeech(message.text), locale);
+    }
+
+    private boolean isDeviceLocked() {
+        KeyguardManager manager = getSystemService(KeyguardManager.class);
+        return manager != null && manager.isDeviceLocked();
+    }
+
+    private boolean hasBluetoothAudioOutput() {
+        AudioManager manager = getSystemService(AudioManager.class);
+        if (manager == null) return false;
+        for (AudioDeviceInfo device : manager.getDevices(AudioManager.GET_DEVICES_OUTPUTS)) {
+            if (!device.isSink()) continue;
+            int type = device.getType();
+            if (type == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP
+                    || type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO
+                    || type == AudioDeviceInfo.TYPE_HEARING_AID
+                    || type == AudioDeviceInfo.TYPE_BLE_HEADSET
+                    || type == AudioDeviceInfo.TYPE_BLE_SPEAKER
+                    || type == AudioDeviceInfo.TYPE_BLE_BROADCAST) return true;
+        }
+        return false;
+    }
+
+    @SuppressWarnings("deprecation")
+    private SpokenMessage spokenMessage(Notification notification) {
+        Bundle extras = notification.extras;
+        if (extras == null) return null;
+        List<Notification.MessagingStyle.Message> messages =
+                Notification.MessagingStyle.Message.getMessagesFromBundleArray(
+                        extras.getParcelableArray(Notification.EXTRA_MESSAGES));
+        if (messages != null) {
+            for (int i = messages.size() - 1; i >= 0; i--) {
+                Notification.MessagingStyle.Message item = messages.get(i);
+                CharSequence text = item.getText();
+                if (text == null || text.toString().trim().isEmpty()) continue;
+                CharSequence sender = item.getSender();
+                String senderText = sender == null ? "" : sender.toString().trim();
+                if (senderText.isEmpty()) senderText = notificationSender(notification, "WhatsApp");
+                return new SpokenMessage(senderText, text.toString().trim());
+            }
+        }
+        String text = value(extras, Notification.EXTRA_TEXT).trim();
+        if (text.isEmpty()) return null;
+        return new SpokenMessage(notificationSender(notification, "WhatsApp"), text);
+    }
+
+    private static String truncateForSpeech(String text) {
+        String singleLine = text.trim().replaceAll("\\s+", " ");
+        return singleLine.length() <= 1000 ? singleLine : singleLine.substring(0, 997) + "…";
+    }
+
+    private Locale detectSpeechLocale(String text) {
+        if (Build.VERSION.SDK_INT >= 29) {
+            try {
+                TextClassificationManager manager = getSystemService(TextClassificationManager.class);
+                if (manager != null) {
+                    TextLanguage result = manager.getTextClassifier().detectLanguage(
+                            new TextLanguage.Request.Builder(text).build());
+                    if (result.getLocaleHypothesisCount() > 0) {
+                        Locale detected = result.getLocale(0).toLocale();
+                        if ("tr".equals(detected.getLanguage())) return new Locale("tr", "TR");
+                        if ("en".equals(detected.getLanguage())) return Locale.ENGLISH;
+                    }
+                }
+            } catch (RuntimeException ignored) { }
+        }
+        if (text.matches(".*[çğıöşüÇĞİÖŞÜ].*")) return new Locale("tr", "TR");
+        return Locale.ENGLISH;
+    }
+
+    private void speak(String text, Locale locale) {
+        pendingSpeech.add(new SpeechItem(text, locale));
+        if (textToSpeech != null) {
+            flushPendingSpeech();
+            return;
+        }
+        if (textToSpeechStarting) return;
+        textToSpeechStarting = true;
+        textToSpeech = new TextToSpeech(getApplicationContext(), status -> {
+            textToSpeechStarting = false;
+            if (status != TextToSpeech.SUCCESS || textToSpeech == null) {
+                if (textToSpeech != null) textToSpeech.shutdown();
+                textToSpeech = null;
+                pendingSpeech.clear();
+                return;
+            }
+            textToSpeech.setAudioAttributes(new AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_ASSISTANCE_ACCESSIBILITY)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                    .build());
+            flushPendingSpeech();
+        });
+    }
+
+    private void flushPendingSpeech() {
+        if (textToSpeech == null) return;
+        if (!Store.isReadWhatsAppEnabled(this) || !isDeviceLocked() || !hasBluetoothAudioOutput()) {
+            pendingSpeech.clear();
+            return;
+        }
+        for (SpeechItem item : pendingSpeech) {
+            int languageResult = textToSpeech.setLanguage(item.locale);
+            if (languageResult == TextToSpeech.LANG_MISSING_DATA
+                    || languageResult == TextToSpeech.LANG_NOT_SUPPORTED) {
+                textToSpeech.setLanguage(Locale.getDefault());
+            }
+            textToSpeech.speak(item.text, TextToSpeech.QUEUE_ADD, null,
+                    "whatsapp-" + System.nanoTime());
+        }
+        pendingSpeech.clear();
+    }
+
+    private static final class SpokenMessage {
+        final String sender;
+        final String text;
+
+        SpokenMessage(String sender, String text) {
+            this.sender = sender == null ? "" : sender.trim();
+            this.text = text == null ? "" : text.trim();
+        }
+    }
+
+    private static final class SpeechItem {
+        final String text;
+        final Locale locale;
+
+        SpeechItem(String text, Locale locale) {
+            this.text = text;
+            this.locale = locale;
+        }
     }
 
     private void showOtpIfPresent(StatusBarNotification notification) {
